@@ -1,0 +1,171 @@
+---
+title: "MSI Status Prediction RF Model"
+author:
+  - Sehyun Oh
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+format:
+    html:
+        fontsize: 14pxs
+        toc: true
+        top-depth: 3
+abstract: "Using the TCGA-COAD cancer samples for training"
+---
+
+```{r load_packages, echo=FALSE}
+suppressPackageStartupMessages({
+    library(caret)      # For model training and evaluation
+    library(pROC)       # For ROC curves
+    library(ROSE)       # For handling imbalanced data
+    library(glmnet)     # For regularized logistic regression
+    library(randomForest)
+    library(xgboost)
+    library(GenomicSuperSignature)
+    library(tidyverse)
+})
+
+source("~/Projects/InferPhenoCuration/R/calculate_auc.R")
+source("~/Projects/InferPhenoCuration/R/plot_roc.R")
+```
+
+```{r}
+RAVmodel <- getModel('C2', load=TRUE)
+```
+
+# 1. Data Preprocessing
+
+```{r}
+## Samples with MSI status info
+combined_data <- readRDS("data/combined_data.rds") # combined cancer samples from three TCGA datasets
+target_attr <- "patient.microsatellite_instability_test_results.microsatellite_instability_test_result.mononucleotide_and_dinucleotide_marker_panel_analysis_status"
+combined_data_msi <- combined_data[,combined_data[[target_attr]] %in% c("msi-h", "mss")]
+
+## Predictor RAVs
+RAVs_combinedTCGA <- c(
+    517, 220, 2109, 1303, 324, 438, 868, # RAVs that have statistically significant pairwise wilcoxon p-values of mss vs msi-h
+    834, 190, 1166, # RAVs with significant KW test statistic (p-value < 0.05) for COAD
+    2344, # significant KW test value for STAD, includes 324, 868, 517 above
+    357) # UCEC KW test value (p-value = 0.056)
+RAVmodel_sub <- RAVmodel[,RAVs_combinedTCGA]
+
+## Calculate sample scores
+sampleScore <- calculateScore(assay(combined_data_msi), RAVmodel_sub)
+```
+
+The `data` object with the predictors (i.e., sample scores from 12 RAVs) and 
+response (i.e., MSI status) variable.
+
+```{r}
+data <- as.data.frame(sampleScore)
+data$status <- colData(combined_data_msi)[[target_attr]]
+data$status <- ifelse(data$status == "msi-h", "MSI", "MSS")
+data$status <- factor(data$status, levels = c("MSS", "MSI")) # Convert outcome to factor
+```
+
+## Split data into training and testing sets
+```{r}
+table(colData(combined_data)$admin.disease_code)
+disease_code <- colData(combined_data)[c("patientID", "admin.disease_code")]
+
+## Train dataset: TCGA-COAD
+coad_id <- disease_code %>% as.data.frame %>% dplyr::filter(admin.disease_code == "coad") %>% pull(patientID)
+train_coad <- data[rownames(data) %in% coad_id,]
+
+## Test datasets
+stad_id <- disease_code %>% as.data.frame %>% dplyr::filter(admin.disease_code == "stad") %>% pull(patientID)
+test_stad <- data[rownames(data) %in% stad_id,]
+ucec_id <- disease_code %>% as.data.frame %>% dplyr::filter(admin.disease_code == "ucec") %>% pull(patientID)
+test_ucec <- data[rownames(data) %in% ucec_id,]
+```
+
+
+
+# 2. Handle class imbalance using `ROSE`
+`ROSE` is used for handling class imbalance (alternatives include `SMOTE` from the *DMwR* package)
+
+```{r}
+# balanced_train <- ROSE(status ~ ., data = train_coad)$data
+```
+
+
+# 3. Basic Logistic Regression
+Both logistic regression and random forest are implemented for comparison
+
+```{r}
+# ## With cross-validation
+# ctrl <- trainControl(method = "cv", 
+#                      number = 5,
+#                      classProbs = TRUE,
+#                      summaryFunction = twoClassSummary)
+# 
+# ## Train logistic regression
+# log_model <- train(status ~ .,
+#                    data = balanced_train,
+#                    method = "glm",
+#                    family = "binomial",
+#                    trControl = ctrl,
+#                    metric = "ROC")
+```
+
+
+# 4. Random Forest with class weights
+Feature importance is assessed through random forest
+
+```{r}
+rf_model <- randomForest(status ~ .,
+                         data = train_coad,
+                         ntree = 500,
+                         classwt = c("MSS" = 1, "MSI" = 3))
+```
+
+
+# 5. Model Evaluation
+Performance evaluation includes ROC curves and confusion matrices
+
+
+## TCGA-STAD test data
+```{r}
+dat <- test_stad
+rf_pred <- predict(rf_model, dat, type = "prob")
+plot_roc_pROC(dat$status, rf_pred[, "MSI"], 
+              paste0("TCGA-STAD MSI Status ROC (n = ", nrow(dat),")")) # update the plot title
+
+roc_stad <- roc(dat$status, rf_pred[, "MSI"])
+```
+
+## TCGA-UCEC test data
+```{r}
+dat <- test_ucec
+rf_pred <- predict(rf_model, dat, type = "prob")
+plot_roc_pROC(dat$status, rf_pred[, "MSI"], 
+              paste0("TCGA-UCEC MSI Status ROC (n = ", nrow(dat),")")) # update the plot title
+
+roc_ucec <- roc(dat$status, rf_pred[, "MSI"])
+```
+
+```{r fig.width=5, fig.height=5}
+## Combined ROC curves
+# plot(roc_rf, col = "blue")
+# lines(roc_coad, col = "red")
+plot(roc_stad, col = "orange")
+lines(roc_ucec, col = "yellow")
+
+legend("bottomright", legend = c("TCGA-STAD", "TCGA-UCEC"),
+       col = c("orange", "yellow"), lwd = 2)
+```
+
+
+
+
+# 6. Feature Importance (for Random Forest)
+```{r}
+importance(rf_model)
+varImpPlot(rf_model)
+```
+
+
+# 7. Confusion Matrix
+```{r collapse=FALSE}
+confusionMatrix(predict(rf_model, test_stad), test_stad$status) # TCGA-STAD (n = 99)
+confusionMatrix(predict(rf_model, test_ucec), test_ucec$status) # TCGA-UCEC (n = 44)
+```
+
