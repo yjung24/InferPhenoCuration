@@ -21,6 +21,15 @@ suppressPackageStartupMessages({
 ## Load RAVmodel -------
 RAVmodel <- getModel('C2', load=TRUE)
 
+load("~/InferPhenoCuration/CRC_subtype_pred/data/eSets/setNames.RData")
+setNames
+
+## Load validation samples
+for (set in setNames) {
+  load(paste0("~/InferPhenoCuration/CRC_subtype_pred/data/eSets/", set, '.RData'))
+}
+
+
 ## Load data (Results/CRC/data/eSets/setNames.RData)
 load("~/InferPhenoCuration/setNames.RData")   # 18 CRC datasets
 names(validated_ind_all) <- setNames
