@@ -1,0 +1,74 @@
+---
+title: "cMD Figure 7 rewrite using OmicsMLRepoR Metadata"
+author: "Yoon Ji Jung"
+date: "2025-04-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load packages
+```{r}
+suppressPackageStartupMessages({
+    library(OmicsMLRepoR)
+    library(dplyr)
+    library(curatedMetagenomicData)
+    library(mia)
+    library(scater)
+})
+```
+
+Retrieve harmonized meta data for cMD using OmicsMLRepoR
+```{r}
+cmd <- getMetadata("cMD")
+```
+
+The association between smoking/smoking history and fecal microbial composition will be examined with smoking status acrooss all relevant samples from curatedMetagenomicData, accessed via returnSamples(). This can be achieved by applying dplyr functions to filter for samples with known smoking status from healthy individuals. After filtering based on these attributes, column containing only NA values are removed from the subset using the where(~ !all(is.na(.x))) statement. Additionally, a new binary variable for smoking status, with levels "Smoker" and "Never Smoker", is created to facilitate downstream analysis.
+
+```{r}
+smoke <- cmd %>% 
+  tree_filter(disease, "healthy") %>% 
+  filter(!is.na(smoker)) %>%
+  filter(body_site == "feces") %>%
+  select(where(~ !all(is.na(.x))))
+
+smoke <- smoke %>%
+  mutate(
+    smoker_bin = as.factor(
+      case_when(smoker == "Smoker (finding)" ~ "Smoker",
+                smoker == "Non-smoker (finding)" ~ "Never Smoker"
+      )))
+
+table(smoke$smoker_bin)
+
+smoke_tse <- smoke %>% returnSamples("relative_abundance", rownames = "short")
+```
+
+Agglomerate By Taxonomic Rank
+```{r}
+smoke_tse2 <- agglomerateByRanks(smoke_tse, rank = "genus")
+```
+
+Using the addAlpha() function from the mia package, alpha diversity between never smokers and smokers can be compared. 
+```{r}
+# adding shannon_diversity values to colData
+smoke_shannon <- smoke_tse2 %>%
+  addAlpha(assay.type = "relative_abundance", index = "shannon_diversity")
+
+# removing samples with NA values for smoker_bin
+smoke_shannon <- smoke_shannon[,!is.na(smoke_shannon$smoker_bin)]
+
+# violin plots
+smoke_shannon %>% plotColData(x = "smoker_bin", y = "shannon_diversity", colour_by = "smoker_bin", shape_by = "smoker_bin") +
+    labs(x = "Smoking Status", y = "Alpha Diversity (H')") +
+    guides(colour = guide_legend(title = "Smoking Status"), shape = guide_legend(title = "Alpha Diversity by Smoking Status")) +
+    theme(legend.position = "none")
+
+# test if alpha diversity between smokers and non-smokers is significantly different
+wilcox.test(shannon_diversity ~ 
+              smoker_bin, data = colData(smoke_shannon))
+## A p-value < 0.01 and a W value > 0 indicate that the never-smoker group has higher alpha diversity compared to the smoker group. This calls for further investigation as to whether smoking can lead to gut dysbiosis.
+```
+
