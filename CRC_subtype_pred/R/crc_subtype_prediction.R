@@ -19,7 +19,6 @@ suppressPackageStartupMessages({
   library(caret)
 })
 
-
 ## Load RAVmodel -------
 RAVmodel <- getModel('C2', load=TRUE)
 
@@ -134,7 +133,9 @@ conMatrix
 # Test model using silu_2022 data 
 ## load clinical data and gene set 
 silu_2022 <- read_tsv("~/InferPhenoCuration/CRC_subtype_pred/data/coad_silu_2022_clinical_data.tsv")
-silu_2022_exp <- read.delim("~/InferPhenoCuration/CRC_subtype_pred/data/data_mrna_seq_expression.txt")
+silu_2022_exp <- read_delim("InferPhenoCuration/CRC_subtype_pred/data/silu_2022_data_mrna_seq_expression.txt", 
+                            delim = "\t", escape_double = FALSE, 
+                            trim_ws = TRUE)
 
 silu_2022$cms <- factor(silu_2022$CMS)
 
@@ -151,20 +152,25 @@ silu_2022_tf <- silu_2022 %>%
 ## convert expression df to matrix
 ## filtering for numeric columns/removing gene symbol column before converting to matrix
 silu_numeric <- silu_2022_exp[, sapply(silu_2022_exp, is.numeric)]
+silu_numeric <- apply(silu_numeric, 1, function(x) x - mean(x))
+silu_numeric <- t(silu_numeric)
 
 ## storing gene names 
 gene_names <- silu_2022_exp$Hugo_Symbol
+
+common_genes <- intersect(rownames(exprs_df), gene_names)
 
 ## converting to matrix
 silu_2022_exp2 <- as.matrix(silu_numeric)
 
 ## adding gene names as rownames
 rownames(silu_2022_exp2) <- gene_names
-validate_silu <- validate(silu_2022_exp2, RAVmodel)
+silu_2022_exp3 <- silu_2022_exp2[common_genes,]
+validate_silu <- validate(silu_2022_exp3, RAVmodel)
 heatmapTable(validate_silu, RAVmodel, num.out = 10)
 
 ## calculate sample scores
-silu_samplescore <- calculateScore(silu_2022_exp2, RAVmodel)
+silu_samplescore <- calculateScore(silu_2022_exp3, RAVmodel)
 ## subset sample scores for predictor RAVs only as a df
 silu_rav_subset <- as.data.frame(silu_samplescore[,validated_crc_RAVs])
 ## combine sample scores and meta data
@@ -179,14 +185,71 @@ silu_combined$cms_label <- factor(silu_combined$cms_label)
 rf_cms_pred2 <-predict(rf_cms_model, silu_combined)
 confusionMatrix(rf_cms_pred2, silu_combined$cms_label)
 
+# Test model using rectal_msk_2022 data from cBioPortal (study used CMScaller)
+## load clinical data and gene set 
+msk_2022 <- read_tsv("~/InferPhenoCuration/CRC_subtype_pred/data/rectal_msk_2022_clinical_data.tsv")
+msk_2022_exp <- read_delim("InferPhenoCuration/CRC_subtype_pred/data/msk_2022_data_mrna_seq_expression.txt", 
+                           delim = "\t", escape_double = FALSE, 
+                           trim_ws = TRUE)
+table(msk_2022$CMS)
+
+## recode CMS variable to harmonize with validation data
+msk_2022$CMS <- as.factor(msk_2022$CMS)
+msk_2022 <- msk_2022 %>% transform(CMS = recode_factor(CMS,"CMS1" = "CMS1", 
+                                 "CMS2" = "CMS2",
+                                 "CMS3" = "CMS3",
+                                 "CMS4" = "CMS4",
+                                 "1" = "NA")) %>%
+                        mutate(cms_label = CMS)
+
+## fix duplicate gene/row names  
+msk_2022_gene_names <- make.unique(msk_2022_exp$Hugo_Symbol)
+
+## only some samples had expression data available: store these sample names
+msk_2022_sample_id <- intersect(msk_2022$`Sample ID`, colnames(msk_2022_exp))
+
+## subset samples in both meta and exp datasets and center exp data
+msk_2022_exp_sub <- msk_2022_exp[,msk_2022_sample_id]
+msk_2022_exp_sub <- as.matrix(msk_2022_exp_sub)
+msk_2022_exp_sub <- apply(msk_2022_exp_sub, 1, function(x) x - mean(x))
+msk_2022_exp_sub <- t(msk_2022_exp_sub)
+
+## assign rownames to exp data subset
+rownames(msk_2022_exp_sub) <- msk_2022_gene_names
+
+## validate using RAVmodel
+validate_msk <- validate(msk_2022_exp_sub, RAVmodel)
+heatmapTable(validate_msk, RAVmodel, num.out = 10)
+
+## obtain sample scores
+msk_samplescore <- calculateScore(msk_2022_exp_sub, RAVmodel)
+msk_rav_subset <- as.data.frame(msk_samplescore[,validated_crc_RAVs])
+
+
+msk_rav_subset <- msk_rav_subset %>% mutate('Sample ID' = rownames(msk_rav_subset))
+## subset meta data for samples with exp data
+msk_2022_2 <- as.data.frame(msk_2022[msk_2022$'Sample ID' %in% msk_2022_sample_id,])
+## combine meta data and exp data using merge on Sample ID column
+msk_combined <- merge(msk_2022_2, msk_rav_subset, by = 'Sample ID')
+## remove NAs for CMS
+msk_combined <- msk_combined %>% 
+  filter(cms_label != "NA") 
+
+## drop NA factor level
+msk_combined$cms_label <- factor(msk_combined$cms_label)
+
+## prediction model for rectal_msk_2022
+rf_cms_pred3 <- predict(rf_cms_model, msk_combined)
+confusionMatrix(rf_cms_pred3, msk_combined$cms_label)
+
 ## GSEA
 RAVmodel2 <- RAVmodel[,validated_crc_RAVs]
 
-## currently hard coded to run with RAVmodel2 with C5 gene set; need to convert to function
-gsea_script <- "~/InferPhenoCuration/CRC_subtype_pred/R/msigdb c5.R"
+## currently hard coded to run with RAVmodel2 with C_ gene set; need to convert to function
+gsea_script <- "~/InferPhenoCuration/CRC_subtype_pred/R/msigdb_gmt.R"
 source(gsea_script)  
 
-gsea_dir <- file.path("~/InferPhenoCuration/CRC_subtype_pred", paste0("gsea"))  # GSEA C5 DB is saved here
+gsea_dir <- file.path("~/InferPhenoCuration/CRC_subtype_pred", paste0("gsea"))  # GSEA C_ DB is saved here
 
 ## from source script in GenomicSuperSignature 
 ## code edit: "qvalues" -> "qvalue"
@@ -225,4 +288,7 @@ searchPathways_edit <- function(RAVmodel, gsea.dir) {
 gsea_all <- searchPathways_edit(RAVmodel2, gsea_dir)  
 gsea(RAVmodel2) <- gsea_all
 
-annotateRAV(RAVmodel2, 192)
+val_RAV_numeric <- c("188","1575","834","832","833","438","324","192","981","220")
+  for (i in seq_len(val_RAV_numeric)) {
+print(annotateRAV(RAVmodel2, val_RAV_numeric[i]))
+  }

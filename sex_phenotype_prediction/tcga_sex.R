@@ -238,15 +238,46 @@ for (i in seq_len(ncol(sex_tcga_rav_subset)-1)) {
   print(wilcox_test$p.value)
 }
 
-## excluding RAVs with Wilcoxon p-values > 0.05 and pearson corr. coeff. > 0.05
+## excluding RAVs with Wilcoxon p-values > 0.05 and pearson corr. coeff. > 0.50
 sex_tcga_ravs <- c("RAV99", "RAV220", "RAV221", "RAV468", "RAV503",  
                    "RAV504", "RAV532", "RAV683", "RAV1241")
 
 ## scatter plot for a pair of RAVs
+df_x <- data.frame(RAV99 = sex_tcga_rav_subset$RAV99, 
+                   RAV220 = sex_tcga_rav_subset$RAV220,
+                   RAV221 = sex_tcga_rav_subset$RAV221,
+                   RAV468 = sex_tcga_rav_subset$RAV468,
+                   RAV503 = sex_tcga_rav_subset$RAV503,
+                   RAV504 = sex_tcga_rav_subset$RAV504,
+                   RAV532 = sex_tcga_rav_subset$RAV532,
+                   RAV683 = sex_tcga_rav_subset$RAV683,
+                   RAV1241 = sex_tcga_rav_subset$RAV1241)
 
-ggplot(sex_tcga_rav_subset, aes(x = RAV99, y = RAV468, color = gender)) +
-  geom_point()
+df_x <- data.frame(RAV99 = sex_tcga_rav_subset$RAV99, 
+                   RAV220 = sex_tcga_rav_subset$RAV220,
+                   RAV221 = sex_tcga_rav_subset$RAV221,
+                   RAV468 = sex_tcga_rav_subset$RAV468,
+                   RAV503 = sex_tcga_rav_subset$RAV503,
+                   RAV504 = sex_tcga_rav_subset$RAV504,
+                   RAV532 = sex_tcga_rav_subset$RAV532,
+                   RAV683 = sex_tcga_rav_subset$RAV683,
+                   RAV1241 = sex_tcga_rav_subset$RAV1241)
 
+combos <- expand.grid(xvar = names(df_x), yvar = names(df_y), stringsAsFactors = FALSE)
+plot_data <- pmap_dfr(combos, function(xvar, yvar) {
+  tibble(
+    x = df_x[[xvar]],
+    y = df_y[[yvar]],
+    group = sex_tcga_rav_subset$gender,
+    xvar = xvar,
+    yvar = yvar
+  )
+})
+ggplot(plot_data, aes(x = x, y = y, color = group)) +
+  geom_point(size = 1) +
+  facet_grid(rows = vars(yvar), cols = vars(xvar), scales = "free") +
+  theme_minimal() +
+  labs(title = "Scatter Plot of all Permutations of RAVs Colored by Gender")
 
 ## rf model using non-sex specific TCGA datasets predicted by sex-specific RAVs
 ## Subset sampleScore to sex predictor RAVs
