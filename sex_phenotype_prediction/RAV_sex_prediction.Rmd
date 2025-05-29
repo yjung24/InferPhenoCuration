@@ -1,0 +1,218 @@
+---
+title: "RAV Sex Prediciton RF"
+author: "Yoon Ji Jung"
+date: "2025-05-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+## Packages -------------
+suppressPackageStartupMessages({
+  # BiocManager
+  library(GenomicSuperSignature)
+  library(curatedTCGAData)
+  library(MultiAssayExperiment)
+  library(TCGAutils)
+  library(ComplexHeatmap)
+  
+  # CRAN
+  library(tidyverse) # includes dplyr, ggplot2, magrittr, tidyr
+  library(magick)
+  library(wordcloud)
+  library(ztable)
+  library(metafolio)
+  library(randomForest)
+  library(caret)
+  library(pROC)
+})
+```
+
+1. Import RAVmodel
+```{r}
+RAVmodel <- getModel('C2', load=TRUE)
+```
+
+
+2. Import sex-specific TCGA datasets and subset training and test datasets
+```{r}
+tcga <- curatedTCGAData(diseaseCode = c('BRCA', 'UCEC', 'OV', 'PRAD'),
+                        assays = 'RNASeq2Gene',
+                        version = '2.1.1',
+                        dry.run = FALSE)
+sampleTables(tcga)
+tcga <- TCGAsplitAssays(tcga, c("01", "11"))
+br_cancer <- getWithColData(tcga,
+                              '01_BRCA_RNASeq2Gene-20160128')
+ut_cancer <- getWithColData(tcga,
+                              '01_UCEC_RNASeq2Gene-20160128')
+ov_cancer <- getWithColData(tcga,
+                              '01_OV_RNASeq2Gene-20160128')
+pr_cancer <- getWithColData(tcga,
+                            '01_PRAD_RNASeq2Gene-20160128')
+
+sex_tcga <- cbind(br_cancer, ut_cancer, ov_cancer, pr_cancer)
+assay(sex_tcga) <- log2(assay(sex_tcga) + 1)
+table(sex_tcga@colData@listData$patient.gender)
+
+# 80% used for training
+set.seed(6)
+n_samples <- nrow(sex_tcga)
+train_sample_index <- sample(seq_len(n_samples), round(n_samples*0.8))
+train_sex_tcga <- sex_tcga[train_sample_index,]
+
+# 20% used for testing
+test_sex_tcga <- sex_tcga[-train_sample_index,]
+```
+
+3. Find top n validated RAVs for sex-specific TCGA (pearson corr. coeff > 0.45)
+```{r}
+train_sex_tcga_meta <- colData(train_sex_tcga)
+train_sex_tcga_gender <- train_sex_tcga@colData@listData$patient.gender
+train_sex_tcga_val <- validate(train_sex_tcga, RAVmodel)
+heatmapTable(train_sex_tcga_val, RAVmodel, num.out=15)
+top_ravs_sex_tcga <- rownames(train_sex_tcga_val %>% filter(score >= 0.45))
+```
+
+4. Calculate sample score and run wilcoxon tests between sample scores and sex
+```{r}
+sc_sex_tcga_train <- calculateScore(train_sex_tcga, RAVmodel)
+sc_sex_tcga_train_subset <- sc_sex_tcga_train[, top_ravs_sex_tcga] %>% as.data.frame()
+sc_sex_tcga_train_subset$sex <- as.factor(train_sex_tcga_gender)
+
+wilcoxon_pvalues <- list()
+for (i in seq_len(ncol(sc_sex_tcga_train_subset)-1)) {
+    RAV <- colnames(sc_sex_tcga_train_subset)[i]
+    ## wilcoxon test
+    wilcox_test <- wilcox.test(sc_sex_tcga_train_subset[, i] ~ sc_sex_tcga_train_subset$sex, alternative="two.sided")
+    wilcoxon_pvalues[[RAV]] <- wilcox_test$p.value
+    #print(wilcox_test$p.value)
+}
+
+wilcoxon_pvalues
+sex_significant_ravs <- c("RAV27", "RAV58", "RAV99", "RAV152", "RAV220", "RAV221", "RAV338",  "RAV357", "RAV468", "RAV503", "RAV504", "RAV531", "RAV532", "RAV683", "RAV711", "RAV1067", "RAV1076", "RAV1241", "RAV1543", "RAV1575", "RAV2514")
+
+
+```
+
+
+
+5. Import non-sex-specific TCGA datasets
+```{r}
+tcga_rf <- curatedTCGAData(diseaseCode = c('COAD', 'STAD', 'LUAD'),
+                        assays = 'RNASeq2Gene',
+                        version = '2.1.1',
+                        dry.run = FALSE)
+sampleTables(tcga_rf)
+tcga_rf <- TCGAsplitAssays(tcga_rf, c("01", "11"))
+
+coad_cancer <- getWithColData(tcga_rf,
+                              '01_COAD_RNASeq2Gene-20160128')
+stad_cancer <- getWithColData(tcga_rf,
+                              '01_STAD_RNASeq2Gene-20160128')
+luad_cancer <- getWithColData(tcga_rf,
+                              '01_LUAD_RNASeq2Gene-20160128')
+
+comb_non_sex_tcga <- cbind(coad_cancer, stad_cancer, luad_cancer)
+assay(comb_non_sex_tcga) <- log2(assay(comb_non_sex_tcga) + 1)
+table(comb_non_sex_tcga@colData@listData$patient.gender)
+
+# 80% used for training
+set.seed(7)
+n_samples2 <- nrow(comb_non_sex_tcga)
+train_sample_index2 <- sample(seq_len(n_samples2), round(n_samples2*0.8))
+train_non_sex_tcga <- comb_non_sex_tcga[train_sample_index2,]
+
+# 20% used for testing
+test_non_sex_tcga <- comb_non_sex_tcga[-train_sample_index2,]
+```
+
+6. Find top n validated RAVs for non-sex-specific TCGA
+```{r}
+train_non_sex_tcga_meta <- colData(train_non_sex_tcga)
+train_non_sex_tcga_gender <- train_non_sex_tcga@colData@listData$patient.gender
+train_non_sex_tcga_val <- validate(train_non_sex_tcga, RAVmodel)
+heatmapTable(train_non_sex_tcga_val, RAVmodel, num.out=15)
+top_ravs_non_sex_tcga <- rownames(train_non_sex_tcga_val %>% filter(score >= 0.45))
+```
+7. Calculate sample scores and run wilcoxon tests between sample scores and sex
+```{r}
+sc_non_sex_tcga_train <- calculateScore(train_non_sex_tcga, RAVmodel)
+sc_non_sex_tcga_train_subset <- sc_non_sex_tcga_train[, top_ravs_non_sex_tcga] %>% as.data.frame()
+sc_non_sex_tcga_train_subset$sex <- as.factor(train_non_sex_tcga_gender)
+
+wilcoxon_pvalues2 <- list()
+for (i in seq_len(ncol(sc_non_sex_tcga_train_subset)-1)) {
+    RAV <- colnames(sc_non_sex_tcga_train_subset)[i]
+    ## wilcoxon test
+    wilcox_test <- wilcox.test(sc_non_sex_tcga_train_subset[, i] ~ sc_non_sex_tcga_train_subset$sex, alternative="two.sided")
+    wilcoxon_pvalues2[[RAV]] <- wilcox_test$p.value
+}
+
+wilcoxon_pvalues2
+non_sex_tcga_sex_significant_ravs <- c("RAV64", "RAV188", "RAV220", "RAV324", "RAV438", "RAV504" , "RAV758", "RAV831", "RAV868", "RAV1019", "RAV1319", "RAV2489", "RAV2528",
+"RAV2528")
+
+```
+
+8. Find overlapping sex-specific and non-sex-specific TCGA sex-significant RAVs
+```{r}
+overlap_sex_ravs <- intersect(non_sex_tcga_sex_significant_ravs, sex_significant_ravs)
+```
+
+# Sex Prediction RF Model Building and Testing
+1. Subset Sample Scores from sex-specific TCGA data for RAV220 and RAV504
+```{r}
+sc_sex_tcga_train_subset2 <- sc_sex_tcga_train_subset[, overlap_sex_ravs]
+sc_sex_tcga_train_subset2$sex <- as.factor(train_sex_tcga_gender)
+```
+
+2. Build RF Model
+```{r}
+predict_sex_rfmodel <- randomForest(sex ~ ., sc_sex_tcga_train_subset2, proximity = TRUE)
+```
+
+3. Calculate samples scores of test data from sex-specific tcga
+```{r}
+sc_sex_tcga_test_gender <- test_sex_tcga@colData@listData$patient.gender
+sc_sex_tcga_test <- calculateScore(test_sex_tcga, RAVmodel)
+sc_sex_tcga_test_subset <- sc_sex_tcga_test[,overlap_sex_ravs] %>% as.data.frame()
+sc_sex_tcga_test_subset$sex <- as.factor(sc_sex_tcga_test_gender)
+```
+
+4. Test RF model using test data from sex-specific tcga
+```{r}
+test_RF <- predict(predict_sex_rfmodel, sc_sex_tcga_test_subset, type = "prob")
+
+##ROC curves
+roc_sex_rf <- roc(sc_sex_tcga_test_subset$sex, test_RF[, "female"])
+## Plot ROC curves
+plot(roc_sex_rf, col = "blue")
+
+##feature importance
+importance(predict_sex_rfmodel)
+varImpPlot(predict_sex_rfmodel)
+
+# confusion matrix
+confusionMatrix(predict(predict_sex_rfmodel, sc_sex_tcga_test_subset), sc_sex_tcga_test_subset$sex)
+```
+
+# Test data using non-sex specific TCGA data
+1. Calculate samples scores of test data from non-sex-specific tcga
+```{r}
+sc_non_sex_tcga_test_gender <- test_non_sex_tcga@colData@listData$patient.gender
+sc_non_sex_tcga_test <- calculateScore(test_non_sex_tcga, RAVmodel)
+sc_non_sex_tcga_test_subset <- sc_non_sex_tcga_test[,overlap_sex_ravs] %>% as.data.frame()
+sc_non_sex_tcga_test_subset$sex <- as.factor(sc_non_sex_tcga_test_gender)
+```
+
+2. Test RF model using non-sex specific TCGA data
+```{r}
+test_RF2 <- predict(predict_sex_rfmodel, sc_non_sex_tcga_test_subset, type = "prob")
+# confusion matrix
+confusionMatrix(predict(predict_sex_rfmodel, sc_non_sex_tcga_test_subset), sc_non_sex_tcga_test_subset$sex)
+```
+

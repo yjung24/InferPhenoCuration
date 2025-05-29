@@ -1,0 +1,96 @@
+---
+title: "MSI Score Prediction"
+author: "Yoon Ji Jung"
+date: "2025-05-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+## Packages -------------
+suppressPackageStartupMessages({
+  # BiocManager
+  library(GenomicSuperSignature)
+  library(curatedTCGAData)
+  library(MultiAssayExperiment)
+  library(TCGAutils)
+  library(ComplexHeatmap)
+  library(cBioPortalData)
+  library(AnVIL)
+  
+  # CRAN
+  library(tidyverse) # includes dplyr, ggplot2, magrittr, tidyr
+  library(magick)
+  library(wordcloud)
+  library(ztable)
+  library(metafolio)
+  library(randomForest)
+  library(readr)
+  library(dplyr)
+  library(caret)
+})
+```
+
+# Import RAVmodel
+```{r}
+RAVmodel <- getModel('C2', load=TRUE)
+```
+
+# Load Data
+```{r}
+#coadTCGA<- cBioDataPack("coadread_tcga_pan_can_atlas_2018", ask = FALSE)
+## error message: vector memory limit of 16.0 Gb reached
+
+## downloaded exprs data and clinical data separately
+
+## expression data
+coadTCGA_2018_exp <- read_delim("~/InferPhenoCuration/MSI_score_prediction/data_mrna_seq_v2_rsem.txt"
+                                , delim = "\t", escape_double = FALSE, 
+                                trim_ws = TRUE)
+## clinical data
+coadTCGA_2018 <- read_delim("~/InferPhenoCuration/MSI_score_prediction/data_clinical_sample.txt"
+                                , delim = "\t", escape_double = FALSE, 
+                                trim_ws = TRUE)
+## find samples with exp data
+samples_with_exp <- colnames(coadTCGA_2018_exp)
+coadTCGA_2018_meta <- coadTCGA_2018[samples_with_exp,]
+
+## add hugo_symbols as rownames and remove hugo_symbol & entrezID columns
+coadTCGA_2018_exp2 <- coadTCGA_2018_exp %>% filter(Hugo_Symbol != "NA")
+coadTCGA_2018_exp2 <- coadTCGA_2018_exp2 %>% distinct(Hugo_Symbol, .keep_all = TRUE) %>% as.data.frame()
+rownames(coadTCGA_2018_exp2) <- coadTCGA_2018_exp2$Hugo_Symbol
+coadTCGA_2018_exp2$Hugo_Symbol <- NULL
+coadTCGA_2018_exp2$Entrez_Gene_Id <- NULL
+
+```
+
+# Split data into 80% training and 20% test
+```{r}
+set.seed(10)
+n_samples <- ncol(coadTCGA_2018_exp2)
+train_sample_index <- sample(seq_len(n_samples), round(n_samples*0.8))
+train_msi <- coadTCGA_2018_exp2[,train_sample_index]
+train_samples <- colnames(train_msi)
+train_msi_meta <- coadTCGA_2018[train_samples,]
+
+train_msi_log <- log2(train_msi + 1)
+train_msi_log <- apply(train_msi_log, 1, function(x) x - mean(x)) %>% t()
+
+# remaining samples for test data
+test_msi <- coadTCGA_2018_exp2[,-train_sample_index]
+test_samples <- colnames(test_msi)
+test_msi_meta <- coadTCGA_2018[test_samples,]
+
+```
+
+# Find top n RAVs
+```{r}
+train_msi_val <- validate(train_msi_log, RAVmodel)
+
+
+```
+
+
