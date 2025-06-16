@@ -43,6 +43,7 @@ RAVmodel <- getModel('C2', load=TRUE)
 ```{r}
 #coadTCGA<- cBioDataPack("coadread_tcga_pan_can_atlas_2018", ask = FALSE)
 ## error message: vector memory limit of 16.0 Gb reached
+## add session info for when submitting this to the repository
 
 ## downloaded exprs data and clinical data separately
 
@@ -54,7 +55,7 @@ coadTCGA_2018_exp <- read_delim("~/InferPhenoCuration/MSI_score_prediction/data_
 coadTCGA_2018 <- read_delim("~/InferPhenoCuration/MSI_score_prediction/data_clinical_sample.txt"
                                 , delim = "\t", escape_double = FALSE, 
                                 trim_ws = TRUE)
-## find samples with exp data
+## find samples with exprs data
 samples_with_exp <- colnames(coadTCGA_2018_exp)
 coadTCGA_2018_meta <- coadTCGA_2018[samples_with_exp,]
 
@@ -73,24 +74,76 @@ set.seed(10)
 n_samples <- ncol(coadTCGA_2018_exp2)
 train_sample_index <- sample(seq_len(n_samples), round(n_samples*0.8))
 train_msi <- coadTCGA_2018_exp2[,train_sample_index]
-train_samples <- colnames(train_msi)
-train_msi_meta <- coadTCGA_2018[train_samples,]
 
 train_msi_log <- log2(train_msi + 1)
 train_msi_log <- apply(train_msi_log, 1, function(x) x - mean(x)) %>% t()
+train_msi_log2 <- train_msi_log[complete.cases(train_msi_log), ]
 
 # remaining samples for test data
 test_msi <- coadTCGA_2018_exp2[,-train_sample_index]
-test_samples <- colnames(test_msi)
-test_msi_meta <- coadTCGA_2018[test_samples,]
+test_msi_log <- log2(test_msi + 1)
+test_msi_log <- apply(test_msi_log, 1, function(x) x - mean(x)) %>% t()
+test_msi_log2 <- test_msi_log[complete.cases(test_msi_log), ]
 
 ```
 
 # Find top n RAVs
 ```{r}
-train_msi_val <- validate(train_msi_log, RAVmodel)
+train_msi_val <- validate(train_msi_log2, RAVmodel)
+heatmapTable(train_msi_val, RAVmodel, num.out=15)
+top_ravs_msi <- rownames(train_msi_val %>% filter(score >= 0.50))
+sc_train_msi <- calculateScore(train_msi_log2, RAVmodel)
+sc_train_msi2 <- sc_train_msi[,top_ravs_msi]
+train_msi_meta <- coadTCGA_2018[match(colnames(train_msi_log2), coadTCGA_2018$`Sample Identifier`), ]
+regression_results <- apply(sc_train_msi2, 2, function(rav_scores) {
+  model <- lm(train_msi_meta$`MSI MANTIS Score` ~ rav_scores)
+  summary_model <- summary(model)
+  c(Estimate = coef(summary_model)[2, "Estimate"],
+    p.value = coef(summary_model)[2, "Pr(>|t|)"],
+    R.squared = summary_model$r.squared)
+})
 
+regression_df <- as.data.frame(t(regression_results))
+regression_df <- regression_df[order(regression_df$p.value), ]
+head(regression_df, 10)
 
+regression_df2 <- regression_df %>% filter(p.value <= 0.05)
+sig_ravs <- rownames(regression_df2)
+
+sc_train_msi_sig_ravs <- sc_train_msi2[,sig_ravs]
+msi_mantis_values <- train_msi_meta$`MSI MANTIS Score`
+sc_train_msi_sig_ravs2 <- cbind(sc_train_msi_sig_ravs, train_msi_meta$`MSI MANTIS Score`)
+colnames(sc_train_msi_sig_ravs2)[5] <- "MSI_MANTIS" 
+sc_train_msi_sig_ravs2 <- sc_train_msi_sig_ravs2 %>% as.data.frame() %>% filter(MSI_MANTIS != "NA")
+sc_train_msi_sig_ravs2[] <- lapply(sc_train_msi_sig_ravs2, function(x) as.numeric(as.character(x)))
+predict_msi_rfmodel <- randomForest(MSI_MANTIS ~ ., sc_train_msi_sig_ravs2, proximity = TRUE)
+```
+
+# prepare test data
+```{r}
+sc_test_msi <- calculateScore(test_msi_log2, RAVmodel)
+sc_test_msi2 <- sc_test_msi[,sig_ravs]
+test_msi_meta <- coadTCGA_2018[match(colnames(test_msi_log2), coadTCGA_2018$`Sample Identifier`), ]
+sc_test_msi3 <- cbind(sc_test_msi2, test_msi_meta$`MSI MANTIS Score`)
+colnames(sc_test_msi3)[5] <- "MSI_MANTIS" 
+sc_test_msi4 <- sc_test_msi3 %>% as.data.frame() %>% filter(MSI_MANTIS != "NA")
+sc_test_msi4[] <- lapply(sc_test_msi4, function(x) as.numeric(as.character(x)))
+
+test_RF_msi <- predict(predict_msi_rfmodel, sc_test_msi4)
+
+sc_test_msi4$predicted <- test_RF_msi
+
+# Mean Squared Error
+mse <- mean((sc_test_msi4$MSI_MANTIS - sc_test_msi4$predicted)^2)
+
+# Root Mean Squared Error
+rmse <- sqrt(mse)
+
+# R-squared
+rss <- sum((sc_test_msi4$MSI_MANTIS - sc_test_msi4$predicted)^2)
+tss <- sum((sc_test_msi4$MSI_MANTIS - mean(sc_test_msi4$MSI_MANTIS))^2)
+r_squared <- 1 - rss/tss
+r_squared
 ```
 
 

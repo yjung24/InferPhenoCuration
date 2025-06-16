@@ -28,6 +28,7 @@ suppressPackageStartupMessages({
   library(randomForest)
   library(caret)
   library(pROC)
+  library(rstatix)
 })
 ```
 
@@ -92,10 +93,23 @@ for (i in seq_len(ncol(sc_sex_tcga_train_subset)-1)) {
     #print(wilcox_test$p.value)
 }
 
+# calculating effect sizes
+long_sc_sex_tcga_train_subset <- sc_sex_tcga_train_subset %>%
+  pivot_longer(
+    cols = -sex,                  # all columns except 'sex'
+    names_to = "RAV",
+    values_to = "score"
+  )
+
+wilcox_effect_sizes <- long_sc_sex_tcga_train_subset %>%
+  group_by(RAV)
+wilcox_effect_sizes <- wilcox_effect_sizes %>% wilcox_effsize(score ~ sex)
+wilcox_effect_sizes_filtered <- wilcox_effect_sizes %>% filter(magnitude != "small")
+
 wilcoxon_pvalues
 sex_significant_ravs <- c("RAV27", "RAV58", "RAV99", "RAV152", "RAV220", "RAV221", "RAV338",  "RAV357", "RAV468", "RAV503", "RAV504", "RAV531", "RAV532", "RAV683", "RAV711", "RAV1067", "RAV1076", "RAV1241", "RAV1543", "RAV1575", "RAV2514")
 
-
+sex_significant_ravs2 <- wilcox_effect_sizes_filtered$RAV
 ```
 
 
@@ -152,9 +166,24 @@ for (i in seq_len(ncol(sc_non_sex_tcga_train_subset)-1)) {
     wilcoxon_pvalues2[[RAV]] <- wilcox_test$p.value
 }
 
+# calculating effect sizes
+long_sc_non_sex_tcga_train_subset <- sc_non_sex_tcga_train_subset %>%
+  pivot_longer(
+    cols = -sex,                  # all columns except 'sex'
+    names_to = "RAV",
+    values_to = "score"
+  )
+
+wilcox_effect_sizes_non_sex <- long_sc_non_sex_tcga_train_subset %>%
+  group_by(RAV)
+wilcox_effect_sizes_non_sex <- wilcox_effect_sizes_non_sex %>% wilcox_effsize(score ~ sex)
+wilcox_effect_sizes_non_sex_filtered <- wilcox_effect_sizes_non_sex %>% filter(magnitude != "small")
+
 wilcoxon_pvalues2
 non_sex_tcga_sex_significant_ravs <- c("RAV64", "RAV188", "RAV220", "RAV324", "RAV438", "RAV504" , "RAV758", "RAV831", "RAV868", "RAV1019", "RAV1319", "RAV2489", "RAV2528",
 "RAV2528")
+
+non_sex_tcga_sex_significant_ravs2 <- wilcox_effect_sizes_non_sex_filtered$RAV
 
 ```
 
