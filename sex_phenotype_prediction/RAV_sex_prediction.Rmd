@@ -185,30 +185,34 @@ non_sex_tcga_sex_significant_ravs <- c("RAV64", "RAV188", "RAV220", "RAV324", "R
 
 non_sex_tcga_sex_significant_ravs2 <- wilcox_effect_sizes_non_sex_filtered$RAV
 
+# No RAVs with moderate to high effect sizes for sex from the non-sex specific training dataset
+
 ```
 
 8. Find overlapping sex-specific and non-sex-specific TCGA sex-significant RAVs
+6/6/25 edit: decided to proceed with only RAVs with mod-high effect sizes from wilcoxon tests 
+conducted on sex-specific tcga training set only
 ```{r}
-overlap_sex_ravs <- intersect(non_sex_tcga_sex_significant_ravs, sex_significant_ravs)
+#overlap_sex_ravs <- intersect(non_sex_tcga_sex_significant_ravs, sex_significant_ravs)
 ```
 
 # Sex Prediction RF Model Building and Testing
 1. Subset Sample Scores from sex-specific TCGA data for RAV220 and RAV504
 ```{r}
-sc_sex_tcga_train_subset2 <- sc_sex_tcga_train_subset[, overlap_sex_ravs]
+sc_sex_tcga_train_subset2 <- sc_sex_tcga_train_subset[, sex_significant_ravs2]
 sc_sex_tcga_train_subset2$sex <- as.factor(train_sex_tcga_gender)
 ```
 
 2. Build RF Model
 ```{r}
-predict_sex_rfmodel <- randomForest(sex ~ ., sc_sex_tcga_train_subset2, proximity = TRUE)
+predict_sex_rfmodel <- randomForest(sex ~ RAV1076 + RAV1241 + RAV152 + RAV220 + RAV221 + RAV2514, sc_sex_tcga_train_subset2, proximity = TRUE)
 ```
 
 3. Calculate samples scores of test data from sex-specific tcga
 ```{r}
 sc_sex_tcga_test_gender <- test_sex_tcga@colData@listData$patient.gender
 sc_sex_tcga_test <- calculateScore(test_sex_tcga, RAVmodel)
-sc_sex_tcga_test_subset <- sc_sex_tcga_test[,overlap_sex_ravs] %>% as.data.frame()
+sc_sex_tcga_test_subset <- sc_sex_tcga_test[,sex_significant_ravs2] %>% as.data.frame()
 sc_sex_tcga_test_subset$sex <- as.factor(sc_sex_tcga_test_gender)
 ```
 
@@ -234,7 +238,7 @@ confusionMatrix(predict(predict_sex_rfmodel, sc_sex_tcga_test_subset), sc_sex_tc
 ```{r}
 sc_non_sex_tcga_test_gender <- test_non_sex_tcga@colData@listData$patient.gender
 sc_non_sex_tcga_test <- calculateScore(test_non_sex_tcga, RAVmodel)
-sc_non_sex_tcga_test_subset <- sc_non_sex_tcga_test[,overlap_sex_ravs] %>% as.data.frame()
+sc_non_sex_tcga_test_subset <- sc_non_sex_tcga_test[,sex_significant_ravs2] %>% as.data.frame()
 sc_non_sex_tcga_test_subset$sex <- as.factor(sc_non_sex_tcga_test_gender)
 ```
 

@@ -116,7 +116,7 @@ sc_train_msi_sig_ravs2 <- cbind(sc_train_msi_sig_ravs, train_msi_meta$`MSI MANTI
 colnames(sc_train_msi_sig_ravs2)[5] <- "MSI_MANTIS" 
 sc_train_msi_sig_ravs2 <- sc_train_msi_sig_ravs2 %>% as.data.frame() %>% filter(MSI_MANTIS != "NA")
 sc_train_msi_sig_ravs2[] <- lapply(sc_train_msi_sig_ravs2, function(x) as.numeric(as.character(x)))
-predict_msi_rfmodel <- randomForest(MSI_MANTIS ~ RAV1166 + RAV192 + RAV178 + RAV188, sc_train_msi_sig_ravs2, proximity = TRUE)
+predict_msi_rfmodel <- randomForest(MSI_MANTIS ~ ., sc_train_msi_sig_ravs2, proximity = TRUE)
 ```
 
 # prepare test data
@@ -146,25 +146,4 @@ r_squared <- 1 - rss/tss
 r_squared
 ```
 
-Creating scatterplot of sample score vs. mantis score
-```{r}
-# reshape to long format
-col_names_ravs <- sc_train_msi_sig_ravs2 %>% select(-MSI_MANTIS) %>% 
-  names()
-
-df_long <- sc_train_msi_sig_ravs2 %>%
-  pivot_longer(all_of(col_names_ravs), names_to = "variable", values_to = "sample_scores")
-
-ggplot(df_long, aes(x = MSI_MANTIS, y = sample_scores)) +
-  geom_point(size = 1) +
-  facet_wrap(~ variable, scales = "free_x")
-  theme_minimal() +
-  labs(title = "Scatter Plot between Sample Scores and MSI MANTIS Scores")
-```
-
-Scatterplot between MSI_MANTIS and MSI_Sensor
-```{r}
-ggplot(train_msi_meta, aes(x = `MSI MANTIS Score`, y = `MSIsensor Score`)) +
-  geom_point(size = 0.6)
-```
 

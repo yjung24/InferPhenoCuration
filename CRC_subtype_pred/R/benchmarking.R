@@ -23,10 +23,15 @@ suppressPackageStartupMessages({
 # CMSclassifier on msk_2022 - originally used CMScaller
 
 ## Load data
-msk_2022 <- read_tsv("~/InferPhenoCuration/CRC_subtype_pred/data/rectal_msk_2022_clinical_data.tsv")
-msk_2022_exp <- read_delim("InferPhenoCuration/CRC_subtype_pred/data/msk_2022_data_mrna_seq_expression.txt", 
-                           delim = "\t", escape_double = FALSE, 
-                           trim_ws = TRUE)
+#msk_2022 <- read_tsv("~/InferPhenoCuration/CRC_subtype_pred/data/rectal_msk_2022_clinical_data.tsv")
+#msk_2022_exp <- read_delim("InferPhenoCuration/CRC_subtype_pred/data/msk_2022_data_mrna_seq_expression.txt", 
+#                           delim = "\t", escape_double = FALSE, 
+#                           trim_ws = TRUE)
+
+## export as RDS objects to make this code reproducible
+
+saveRDS(msk_2022, file = "~/InferPhenoCuration/CRC_subtype_pred/data/msk_2022.rds")
+saveRDS(msk_2022_exp, file = "~/InferPhenoCuration/CRC_subtype_pred/data/msk_2022_exp.rds")
 
 ## Account for duplicate Hugo Symbols
 msk_2022_gep <- msk_2022_exp %>% 
@@ -99,6 +104,10 @@ silu_2022 <- read_tsv("~/InferPhenoCuration/CRC_subtype_pred/data/coad_silu_2022
 silu_2022_exp <- read_delim("InferPhenoCuration/CRC_subtype_pred/data/silu_2022_data_mrna_seq_expression.txt", 
                             delim = "\t", escape_double = FALSE, 
                             trim_ws = TRUE)
+
+saveRDS(silu_2022, file = "~/InferPhenoCuration/CRC_subtype_pred/data/silu_2022.rds")
+saveRDS(silu_2022_exp, file = "~/InferPhenoCuration/CRC_subtype_pred/data/silu_2022_exp.rds")
+
 
 silu_2022_gep <- silu_2022_exp %>% 
   distinct(Hugo_Symbol, .keep_all = TRUE) %>%
